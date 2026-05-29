@@ -37,6 +37,14 @@ def slice_volume(volume: np.ndarray, axis: int, index: int) -> np.ndarray:
     return np.rot90(image)
 
 
+def best_slice(mask_volume: np.ndarray, axis: int) -> int:
+    axes = tuple(dim for dim in range(mask_volume.ndim) if dim != axis)
+    mask_area = (mask_volume > 0).sum(axis=axes)
+    if mask_area.max() == 0:
+        return mask_volume.shape[axis] // 2
+    return int(mask_area.argmax())
+
+
 def overlay_mask(base: np.ndarray, mask: np.ndarray, color: tuple[float, float, float], alpha: float) -> np.ndarray:
     base_rgb = np.dstack([base, base, base])
     mask_bool = mask > 0
@@ -71,13 +79,26 @@ def find_cases() -> list[dict[str, Path]]:
     return cases
 
 
+def plot_panel(title: str, image: np.ndarray, cmap: str | None = None):
+    fig, ax = plt.subplots(figsize=(4.8, 4.8))
+    ax.imshow(image, cmap=cmap)
+    ax.set_title(title)
+    ax.axis("off")
+    fig.tight_layout(pad=0.3)
+    return fig
+
+
+def projection(volume: np.ndarray, axis: int) -> np.ndarray:
+    return np.rot90(np.max(volume, axis=axis))
+
+
 st.set_page_config(page_title="Missing-Seg Demo", layout="wide")
 
 st.title("Missing-Modality Brain Tumor Segmentation Demo")
 st.write(
-    "A lightweight visualization demo for one prepared Missing-Seg case. "
-    "It compares the input MRI volume, ground-truth label, model prediction, "
-    "and mask overlays across anatomical slices."
+    "This lightweight demo visualizes one prepared Missing-Seg case. "
+    "Because NIfTI files are 3D medical volumes rather than single images, "
+    "the app shows both a whole-volume projection and selectable 2D slices."
 )
 
 cases = find_cases()
@@ -101,7 +122,19 @@ if image_volume.shape != label_volume.shape or image_volume.shape != prediction_
     st.stop()
 
 axis = PLANES[plane_name]
-slice_index = st.sidebar.slider("Slice", min_value=0, max_value=image_volume.shape[axis] - 1, value=image_volume.shape[axis] // 2)
+default_slice = best_slice(label_volume + prediction_volume, axis)
+slice_index = st.sidebar.slider(
+    "Slice",
+    min_value=0,
+    max_value=image_volume.shape[axis] - 1,
+    value=default_slice,
+    help="The default slice is chosen automatically from the largest label/prediction area.",
+)
+
+st.caption(
+    f"Volume shape: {image_volume.shape}. Showing {plane_name.lower()} slice {slice_index}. "
+    "Use the sidebar slider to inspect the full volume."
+)
 
 image_slice = normalize_image(slice_volume(image_volume, axis, slice_index))
 label_slice = slice_volume(label_volume, axis, slice_index)
@@ -113,23 +146,30 @@ prediction_overlay = overlay_mask(image_slice, prediction_slice, color=(0.0, 0.5
 dice = dice_score(prediction_volume, label_volume)
 st.metric("Volume Dice score", f"{dice:.3f}")
 
-col1, col2, col3, col4 = st.columns(4)
-with col1:
-    st.image(image_slice, caption="Input MRI", clamp=True)
-with col2:
-    st.image(label_slice > 0, caption="Ground truth label", clamp=True)
-with col3:
-    st.image(prediction_slice > 0, caption="Prediction", clamp=True)
-with col4:
-    st.image(prediction_overlay, caption="Prediction overlay", clamp=True)
+st.subheader("Whole-Volume Overview")
+overview_cols = st.columns(3)
+with overview_cols[0]:
+    st.pyplot(plot_panel("MRI maximum-intensity projection", normalize_image(projection(image_volume, axis)), cmap="gray"))
+with overview_cols[1]:
+    st.pyplot(plot_panel("Ground truth projection", projection(label_volume > 0, axis), cmap="gray"))
+with overview_cols[2]:
+    st.pyplot(plot_panel("Prediction projection", projection(prediction_volume > 0, axis), cmap="gray"))
+
+st.subheader("Selected Slice")
+slice_cols = st.columns(4)
+with slice_cols[0]:
+    st.pyplot(plot_panel("Input MRI", image_slice, cmap="gray"))
+with slice_cols[1]:
+    st.pyplot(plot_panel("Ground truth label", label_slice > 0, cmap="gray"))
+with slice_cols[2]:
+    st.pyplot(plot_panel("Prediction", prediction_slice > 0, cmap="gray"))
+with slice_cols[3]:
+    st.pyplot(plot_panel("Prediction overlay", prediction_overlay))
 
 st.subheader("Overlay Comparison")
-fig, axes = plt.subplots(1, 2, figsize=(10, 4))
-axes[0].imshow(label_overlay)
-axes[0].set_title("Ground truth overlay")
-axes[0].axis("off")
-axes[1].imshow(prediction_overlay)
-axes[1].set_title("Prediction overlay")
-axes[1].axis("off")
-st.pyplot(fig)
+comparison_cols = st.columns(2)
+with comparison_cols[0]:
+    st.pyplot(plot_panel("Ground truth overlay", label_overlay))
+with comparison_cols[1]:
+    st.pyplot(plot_panel("Prediction overlay", prediction_overlay))
 
