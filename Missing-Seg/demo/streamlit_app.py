@@ -22,6 +22,41 @@ def load_volume(path: str) -> np.ndarray:
     return np.squeeze(volume)
 
 
+def align_image_volume(image_volume: np.ndarray, reference_shape: tuple[int, int, int], modality: int) -> np.ndarray:
+    if image_volume.shape == reference_shape:
+        return image_volume
+
+    if image_volume.ndim == 4:
+        modality_axis = next((axis for axis, size in enumerate(image_volume.shape) if size <= 8), None)
+        if modality_axis is None:
+            st.error(f"Could not identify the modality axis in image shape {image_volume.shape}.")
+            st.stop()
+
+        modality_count = image_volume.shape[modality_axis]
+        modality = min(modality, modality_count - 1)
+        image_volume = np.take(image_volume, modality, axis=modality_axis)
+
+    if image_volume.shape == reference_shape:
+        return image_volume
+
+    for axes in (
+        (2, 0, 1),
+        (1, 2, 0),
+        (0, 2, 1),
+        (1, 0, 2),
+        (2, 1, 0),
+    ):
+        transposed = np.transpose(image_volume, axes)
+        if transposed.shape == reference_shape:
+            return transposed
+
+    st.error(
+        "Could not align the image volume with the label/prediction volume. "
+        f"Image shape after modality selection: {image_volume.shape}; reference shape: {reference_shape}."
+    )
+    st.stop()
+
+
 def normalize_image(image: np.ndarray) -> np.ndarray:
     image = image.astype(np.float32)
     lower, upper = np.percentile(image, [1, 99])
@@ -110,9 +145,25 @@ case = st.sidebar.selectbox("Case", cases, format_func=lambda item: item["name"]
 plane_name = st.sidebar.radio("View plane", list(PLANES.keys()), horizontal=True)
 opacity = st.sidebar.slider("Overlay opacity", min_value=0.1, max_value=0.9, value=0.45, step=0.05)
 
-image_volume = load_volume(str(case["image"]))
+raw_image_volume = load_volume(str(case["image"]))
 label_volume = load_volume(str(case["label"]))
 prediction_volume = load_volume(str(case["prediction"]))
+
+modality_count = 1
+if raw_image_volume.ndim == 4:
+    modality_axis = next((axis for axis, size in enumerate(raw_image_volume.shape) if size <= 8), None)
+    if modality_axis is not None:
+        modality_count = raw_image_volume.shape[modality_axis]
+
+modality = 0
+if modality_count > 1:
+    modality = st.sidebar.selectbox(
+        "Input modality",
+        list(range(modality_count)),
+        format_func=lambda value: f"Modality {value + 1}",
+    )
+
+image_volume = align_image_volume(raw_image_volume, label_volume.shape, modality)
 
 if image_volume.shape != label_volume.shape or image_volume.shape != prediction_volume.shape:
     st.error(
@@ -172,4 +223,3 @@ with comparison_cols[0]:
     st.pyplot(plot_panel("Ground truth overlay", label_overlay))
 with comparison_cols[1]:
     st.pyplot(plot_panel("Prediction overlay", prediction_overlay))
-
