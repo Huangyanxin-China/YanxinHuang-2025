@@ -5,6 +5,8 @@ see the documentation under `code/`.
 
 ## Lightweight Streamlit Demo
 
+Live demo: https://missing-seg.streamlit.app/
+
 This repository includes a small visualization demo based on the prepared
 `Ours` case:
 
@@ -31,4 +33,3 @@ streamlit run Missing-Seg/demo/streamlit_app.py
 
 For a live online demo, deploy `Missing-Seg/demo/streamlit_app.py` with the
 demo requirements on Streamlit Community Cloud or Hugging Face Spaces.
-
